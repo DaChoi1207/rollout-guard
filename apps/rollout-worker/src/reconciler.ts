@@ -110,6 +110,32 @@ export class DeploymentReconciler {
     }
   }
 
+  public async failDeployment(
+    deploymentId: string,
+    reason: string
+  ): Promise<ReconcileResult> {
+    const deployment =
+      await this.dependencies.deployments.getDeploymentById(deploymentId);
+    if (!deployment) {
+      return { outcome: "NOT_FOUND" };
+    }
+    if (
+      deployment.state === "SUCCEEDED" ||
+      deployment.state === "ROLLED_BACK" ||
+      deployment.state === "FAILED"
+    ) {
+      return { outcome: "TERMINAL", state: deployment.state };
+    }
+    return this.transition(
+      deployment,
+      "FAILED",
+      `Retry policy exhausted: ${reason}`,
+      undefined,
+      undefined,
+      reason
+    );
+  }
+
   private async reconcileCandidateHealth(
     deployment: Deployment
   ): Promise<ReconcileResult> {
@@ -177,6 +203,17 @@ export class DeploymentReconciler {
       minimumCandidateRequests: step.minimumRequests
     });
     if (analysis.decision === "INSUFFICIENT_DATA") {
+      if (elapsedMs >= step.maximumObservationMs) {
+        const reason = `Observation deadline exceeded: ${analysis.reason}`;
+        return this.transition(
+          deployment,
+          "ROLLING_BACK",
+          reason,
+          undefined,
+          analysis,
+          reason
+        );
+      }
       return {
         outcome: "WAITING",
         reason: analysis.reason
@@ -268,19 +305,13 @@ export class DeploymentReconciler {
         failureReason === undefined
           ? deployment.failureReason
           : failureReason,
+      reconcileFailureCount: 0,
+      nextReconcileAt: null,
+      lastReconcileError: null,
       updatedAt: now
     };
 
-    const updatedSuccessfully =
-      await this.dependencies.deployments.updateDeployment(
-        updated,
-        deployment.stateVersion
-      );
-    if (!updatedSuccessfully) {
-      return { outcome: "CONFLICT" };
-    }
-
-    await this.dependencies.deployments.appendEvent({
+    const event = {
       id: this.createId(),
       deploymentId: deployment.id,
       eventType: "STATE_CHANGED",
@@ -299,7 +330,16 @@ export class DeploymentReconciler {
           : {})
       },
       createdAt: now
-    });
+    };
+    const updatedSuccessfully =
+      await this.dependencies.deployments.transitionDeployment(
+        updated,
+        deployment.stateVersion,
+        event
+      );
+    if (!updatedSuccessfully) {
+      return { outcome: "CONFLICT" };
+    }
 
     return {
       outcome: "TRANSITIONED",

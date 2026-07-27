@@ -82,6 +82,24 @@ Run `npm.cmd run load:local` in another terminal so each step receives enough
 traffic. The default Compose candidate has a 15% simulated error rate and should
 finish as `ROLLED_BACK`.
 
+## Reliability behavior
+
+The worker is restart-safe because every poll reloads the deployment from
+PostgreSQL and performs at most one action. State changes and timeline events
+are committed atomically in one optimistic-concurrency SQL statement.
+
+Transient provider failures persist:
+
+- the error message;
+- the failure and rollback-attempt counts; and
+- the next retry time using capped exponential backoff.
+
+Successful transitions clear transient retry state. Retry exhaustion moves the
+deployment to `FAILED` and records a final event. If metrics remain insufficient
+past the observation deadline, the controller fails safe by entering rollback.
+Two workers may issue the same absolute traffic command, but `state_version`
+allows only one of them to commit the transition and event.
+
 Generate local traffic through the router:
 
 ```powershell

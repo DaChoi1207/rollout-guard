@@ -31,6 +31,10 @@ export type Deployment = {
   candidateWeight: number;
   currentStepIndex: number;
   stateVersion: number;
+  reconcileFailureCount: number;
+  rollbackAttemptCount: number;
+  nextReconcileAt: Date | null;
+  lastReconcileError: string | null;
   failureReason: string | null;
   stepStartedAt: Date | null;
   createdAt: Date;

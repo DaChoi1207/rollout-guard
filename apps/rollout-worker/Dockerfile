@@ -12,6 +12,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/apps/database/package.json apps/database/package.json
 COPY --from=build /app/apps/database/dist apps/database/dist
+COPY --from=build /app/apps/database/migrations apps/database/migrations
 COPY --from=build /app/apps/rollout-worker/package.json apps/rollout-worker/package.json
 COPY --from=build /app/apps/rollout-worker/dist apps/rollout-worker/dist
 CMD ["node", "apps/rollout-worker/dist/worker.js"]

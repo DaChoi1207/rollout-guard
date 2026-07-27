@@ -1,12 +1,15 @@
 import {
   createDatabasePool,
-  PostgresDeploymentRepository
+  PostgresDeploymentRepository,
+  runMigrations
 } from "@rollout-guard/database";
 import { HttpRuntimeProvider, HttpTrafficRouter } from "./adapters.js";
 import { loadWorkerConfig } from "./config.js";
 import { DeploymentReconciler } from "./reconciler.js";
+import { handleReconcileFailure } from "./reliability.js";
 
 const config = loadWorkerConfig();
+await runMigrations(config.databaseUrl);
 const pool = createDatabasePool(config.databaseUrl);
 const deployments = new PostgresDeploymentRepository(pool);
 const runtime = new HttpRuntimeProvider(
@@ -53,9 +56,24 @@ async function poll(): Promise<void> {
         result
       });
     } catch (error) {
+      const normalizedError =
+        error instanceof Error ? error : new Error(String(error));
+      const retryOutcome = await handleReconcileFailure({
+        deployment,
+        error: normalizedError,
+        deployments,
+        reconciler,
+        policy: {
+          maximumAttempts: config.maximumRetryAttempts,
+          maximumRollbackAttempts: config.maximumRollbackAttempts,
+          baseDelayMs: config.retryBaseDelayMs,
+          maximumDelayMs: config.retryMaximumDelayMs
+        }
+      });
       log("error", "deployment reconciliation failed", {
         deploymentId: deployment.id,
-        error: error instanceof Error ? error.message : String(error)
+        error: normalizedError.message,
+        retryOutcome
       });
     }
   }

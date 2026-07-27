@@ -56,6 +56,10 @@ const deployment: Deployment = {
   candidateWeight: 10,
   currentStepIndex: 0,
   stateVersion: 2,
+  reconcileFailureCount: 0,
+  rollbackAttemptCount: 0,
+  nextReconcileAt: null,
+  lastReconcileError: null,
   failureReason: null,
   stepStartedAt: timestamp,
   createdAt: timestamp,
@@ -81,6 +85,10 @@ describe("PostgresDeploymentRepository", () => {
           candidate_weight: 10,
           current_step_index: 0,
           state_version: 2,
+          reconcile_failure_count: 0,
+          rollback_attempt_count: 0,
+          next_reconcile_at: null,
+          last_reconcile_error: null,
           failure_reason: null,
           step_started_at: timestamp,
           created_at: timestamp,
@@ -127,7 +135,7 @@ describe("PostgresDeploymentRepository", () => {
 
     const update = database.queries[0];
     expect(update?.text).toContain("state_version = state_version + 1");
-    expect(update?.text).toContain("AND state_version = $10");
+    expect(update?.text).toContain("AND state_version = $14");
     expect(update?.values.at(-1)).toBe(2);
   });
 
@@ -175,5 +183,59 @@ describe("PostgresDeploymentRepository", () => {
       JSON.stringify(event.metadata)
     );
     expect(database.queries[1]?.text).toContain("INSERT INTO request_metrics");
+  });
+
+  it("writes a transition and its event atomically", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    database.results.push(queryResult([{ event_id: "event-1" }]));
+    const event: DeploymentEvent = {
+      id: "30000000-0000-4000-8000-000000000001",
+      deploymentId: deployment.id,
+      eventType: "STATE_CHANGED",
+      fromState: "WAITING_FOR_HEALTH",
+      toState: "CANARY_10",
+      message: "Candidate received traffic",
+      metadata: {},
+      createdAt: timestamp
+    };
+
+    await expect(
+      repository.transitionDeployment(deployment, 2, event)
+    ).resolves.toBe(true);
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0]?.text).toContain("WITH updated AS");
+    expect(database.queries[0]?.text).toContain(
+      "INSERT INTO deployment_events"
+    );
+  });
+
+  it("records retry state with optimistic concurrency", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    database.results.push(queryResult([{ state_version: 3 }]));
+    const nextReconcileAt = new Date("2026-07-27T12:00:01.000Z");
+
+    await expect(
+      repository.recordReconcileFailure({
+        deploymentId: deployment.id,
+        expectedStateVersion: 2,
+        error: "router unavailable",
+        nextReconcileAt,
+        isRollback: true
+      })
+    ).resolves.toBe(true);
+
+    expect(database.queries[0]?.text).toContain(
+      "reconcile_failure_count = reconcile_failure_count + 1"
+    );
+    expect(database.queries[0]?.values).toEqual([
+      true,
+      nextReconcileAt,
+      "router unavailable",
+      deployment.id,
+      2
+    ]);
   });
 });

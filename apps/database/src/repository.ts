@@ -31,6 +31,10 @@ type DeploymentRow = {
   candidate_weight: number;
   current_step_index: number;
   state_version: number;
+  reconcile_failure_count: number;
+  rollback_attempt_count: number;
+  next_reconcile_at: Date | null;
+  last_reconcile_error: string | null;
   failure_reason: string | null;
   step_started_at: Date | null;
   created_at: Date;
@@ -68,6 +72,10 @@ function mapDeployment(row: DeploymentRow): Deployment {
     candidateWeight: row.candidate_weight,
     currentStepIndex: row.current_step_index,
     stateVersion: row.state_version,
+    reconcileFailureCount: row.reconcile_failure_count,
+    rollbackAttemptCount: row.rollback_attempt_count,
+    nextReconcileAt: row.next_reconcile_at,
+    lastReconcileError: row.last_reconcile_error,
     failureReason: row.failure_reason,
     stepStartedAt: row.step_started_at,
     createdAt: row.created_at,
@@ -126,9 +134,13 @@ export class PostgresDeploymentRepository {
       `INSERT INTO deployments (
          id, service_id, stable_revision_id, candidate_revision_id, state,
          stable_weight, candidate_weight, current_step_index, state_version,
-         failure_reason, step_started_at, created_at, updated_at
+         reconcile_failure_count, rollback_attempt_count, next_reconcile_at,
+         last_reconcile_error, failure_reason, step_started_at, created_at, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+         $15, $16, $17
+       )`,
       [
         deployment.id,
         deployment.serviceId,
@@ -139,6 +151,10 @@ export class PostgresDeploymentRepository {
         deployment.candidateWeight,
         deployment.currentStepIndex,
         deployment.stateVersion,
+        deployment.reconcileFailureCount,
+        deployment.rollbackAttemptCount,
+        deployment.nextReconcileAt,
+        deployment.lastReconcileError,
         deployment.failureReason,
         deployment.stepStartedAt,
         deployment.createdAt,
@@ -163,6 +179,7 @@ export class PostgresDeploymentRepository {
       `SELECT *
        FROM deployments
        WHERE state NOT IN ('SUCCEEDED', 'ROLLED_BACK', 'FAILED')
+         AND (next_reconcile_at IS NULL OR next_reconcile_at <= NOW())
        ORDER BY created_at ASC`
     );
     return result.rows.map(mapDeployment);
@@ -180,11 +197,15 @@ export class PostgresDeploymentRepository {
            candidate_weight = $4,
            current_step_index = $5,
            state_version = state_version + 1,
-           failure_reason = $6,
-           step_started_at = $7,
-           updated_at = $8
-       WHERE id = $9
-         AND state_version = $10
+           reconcile_failure_count = $6,
+           rollback_attempt_count = $7,
+           next_reconcile_at = $8,
+           last_reconcile_error = $9,
+           failure_reason = $10,
+           step_started_at = $11,
+           updated_at = $12
+       WHERE id = $13
+         AND state_version = $14
        RETURNING state_version`,
       [
         deployment.candidateRevisionId,
@@ -192,11 +213,103 @@ export class PostgresDeploymentRepository {
         deployment.stableWeight,
         deployment.candidateWeight,
         deployment.currentStepIndex,
+        deployment.reconcileFailureCount,
+        deployment.rollbackAttemptCount,
+        deployment.nextReconcileAt,
+        deployment.lastReconcileError,
         deployment.failureReason,
         deployment.stepStartedAt,
         deployment.updatedAt,
         deployment.id,
         expectedStateVersion
+      ]
+    );
+    return result.rowCount === 1;
+  }
+
+  public async transitionDeployment(
+    deployment: Deployment,
+    expectedStateVersion: number,
+    event: DeploymentEvent
+  ): Promise<boolean> {
+    const result = await this.database.query<{ event_id: string }>(
+      `WITH updated AS (
+         UPDATE deployments
+         SET candidate_revision_id = $1,
+             state = $2,
+             stable_weight = $3,
+             candidate_weight = $4,
+             current_step_index = $5,
+             state_version = state_version + 1,
+             reconcile_failure_count = $6,
+             rollback_attempt_count = $7,
+             next_reconcile_at = $8,
+             last_reconcile_error = $9,
+             failure_reason = $10,
+             step_started_at = $11,
+             updated_at = $12
+         WHERE id = $13
+           AND state_version = $14
+         RETURNING id
+       )
+       INSERT INTO deployment_events (
+         id, deployment_id, event_type, from_state, to_state,
+         message, metadata, created_at
+       )
+       SELECT $15, updated.id, $16, $17, $18, $19, $20::JSONB, $21
+       FROM updated
+       RETURNING id AS event_id`,
+      [
+        deployment.candidateRevisionId,
+        deployment.state,
+        deployment.stableWeight,
+        deployment.candidateWeight,
+        deployment.currentStepIndex,
+        deployment.reconcileFailureCount,
+        deployment.rollbackAttemptCount,
+        deployment.nextReconcileAt,
+        deployment.lastReconcileError,
+        deployment.failureReason,
+        deployment.stepStartedAt,
+        deployment.updatedAt,
+        deployment.id,
+        expectedStateVersion,
+        event.id,
+        event.eventType,
+        event.fromState,
+        event.toState,
+        event.message,
+        JSON.stringify(event.metadata),
+        event.createdAt
+      ]
+    );
+    return result.rowCount === 1;
+  }
+
+  public async recordReconcileFailure(input: {
+    deploymentId: string;
+    expectedStateVersion: number;
+    error: string;
+    nextReconcileAt: Date;
+    isRollback: boolean;
+  }): Promise<boolean> {
+    const result = await this.database.query<{ state_version: number }>(
+      `UPDATE deployments
+       SET reconcile_failure_count = reconcile_failure_count + 1,
+           rollback_attempt_count = rollback_attempt_count + CASE WHEN $1 THEN 1 ELSE 0 END,
+           next_reconcile_at = $2,
+           last_reconcile_error = $3,
+           state_version = state_version + 1,
+           updated_at = NOW()
+       WHERE id = $4
+         AND state_version = $5
+       RETURNING state_version`,
+      [
+        input.isRollback,
+        input.nextReconcileAt,
+        input.error,
+        input.deploymentId,
+        input.expectedStateVersion
       ]
     );
     return result.rowCount === 1;

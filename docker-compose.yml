@@ -74,6 +74,10 @@ services:
       ROUTER_URL: http://local-router:8080
       POLL_INTERVAL_MS: "1000"
       HTTP_TIMEOUT_MS: "2000"
+      MAXIMUM_RETRY_ATTEMPTS: "5"
+      MAXIMUM_ROLLBACK_ATTEMPTS: "5"
+      RETRY_BASE_DELAY_MS: "1000"
+      RETRY_MAXIMUM_DELAY_MS: "30000"
     depends_on:
       postgres:
         condition: service_healthy

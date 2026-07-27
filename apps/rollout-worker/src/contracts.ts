@@ -10,7 +10,18 @@ export interface DeploymentStore {
     deployment: Deployment,
     expectedStateVersion: number
   ): Promise<boolean>;
-  appendEvent(event: DeploymentEvent): Promise<void>;
+  transitionDeployment(
+    deployment: Deployment,
+    expectedStateVersion: number,
+    event: DeploymentEvent
+  ): Promise<boolean>;
+  recordReconcileFailure(input: {
+    deploymentId: string;
+    expectedStateVersion: number;
+    error: string;
+    nextReconcileAt: Date;
+    isRollback: boolean;
+  }): Promise<boolean>;
 }
 
 export interface RuntimeProvider {

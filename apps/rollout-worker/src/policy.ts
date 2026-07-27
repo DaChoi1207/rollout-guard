@@ -6,6 +6,7 @@ export type RolloutStep = {
   candidateWeight: number;
   minimumRequests: number;
   minimumDurationMs: number;
+  maximumObservationMs: number;
 };
 
 export const developmentRolloutPolicy: readonly RolloutStep[] = [
@@ -14,28 +15,32 @@ export const developmentRolloutPolicy: readonly RolloutStep[] = [
     stableWeight: 90,
     candidateWeight: 10,
     minimumRequests: 10,
-    minimumDurationMs: 5_000
+    minimumDurationMs: 5_000,
+    maximumObservationMs: 60_000
   },
   {
     state: "CANARY_50",
     stableWeight: 50,
     candidateWeight: 50,
     minimumRequests: 20,
-    minimumDurationMs: 5_000
+    minimumDurationMs: 5_000,
+    maximumObservationMs: 60_000
   },
   {
     state: "FULL_TRAFFIC",
     stableWeight: 0,
     candidateWeight: 100,
     minimumRequests: 30,
-    minimumDurationMs: 5_000
+    minimumDurationMs: 5_000,
+    maximumObservationMs: 60_000
   },
   {
     state: "OBSERVING",
     stableWeight: 0,
     candidateWeight: 100,
     minimumRequests: 30,
-    minimumDurationMs: 5_000
+    minimumDurationMs: 5_000,
+    maximumObservationMs: 60_000
   }
 ];
 

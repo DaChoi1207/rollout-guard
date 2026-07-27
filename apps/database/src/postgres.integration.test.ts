@@ -8,6 +8,8 @@ import type { Deployment, Service } from "./types.js";
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 const pool = databaseUrl ? createDatabasePool(databaseUrl) : null;
+const deploymentIds: string[] = [];
+const serviceIds: string[] = [];
 
 describeWithDatabase("PostgreSQL persistence", () => {
   beforeAll(async () => {
@@ -15,12 +17,19 @@ describeWithDatabase("PostgreSQL persistence", () => {
       return;
     }
     await runMigrations(databaseUrl);
-    await pool.query(
-      "TRUNCATE request_metrics, deployment_events, deployments, services CASCADE"
-    );
   });
 
   afterAll(async () => {
+    if (pool && deploymentIds.length > 0) {
+      await pool.query("DELETE FROM deployments WHERE id = ANY($1::UUID[])", [
+        deploymentIds
+      ]);
+    }
+    if (pool && serviceIds.length > 0) {
+      await pool.query("DELETE FROM services WHERE id = ANY($1::UUID[])", [
+        serviceIds
+      ]);
+    }
     await pool?.end();
   });
 
@@ -39,16 +48,22 @@ describeWithDatabase("PostgreSQL persistence", () => {
       serviceId: service.id,
       stableRevisionId: "v1",
       candidateRevisionId: "v2",
-      state: "QUEUED",
-      stableWeight: 100,
-      candidateWeight: 0,
+      state: "SUCCEEDED",
+      stableWeight: 0,
+      candidateWeight: 100,
       currentStepIndex: 0,
       stateVersion: 0,
+      reconcileFailureCount: 0,
+      rollbackAttemptCount: 0,
+      nextReconcileAt: null,
+      lastReconcileError: null,
       failureReason: null,
       stepStartedAt: null,
       createdAt: new Date(),
       updatedAt: new Date()
     };
+    serviceIds.push(service.id);
+    deploymentIds.push(deployment.id);
 
     await new PostgresDeploymentRepository(pool).createService(service);
     await new PostgresDeploymentRepository(pool).createDeployment(deployment);

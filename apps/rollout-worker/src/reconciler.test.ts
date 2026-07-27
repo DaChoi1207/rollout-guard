@@ -19,28 +19,32 @@ const instantPolicy: readonly RolloutStep[] = [
     stableWeight: 90,
     candidateWeight: 10,
     minimumRequests: 1,
-    minimumDurationMs: 0
+    minimumDurationMs: 0,
+    maximumObservationMs: 60_000
   },
   {
     state: "CANARY_50",
     stableWeight: 50,
     candidateWeight: 50,
     minimumRequests: 1,
-    minimumDurationMs: 0
+    minimumDurationMs: 0,
+    maximumObservationMs: 60_000
   },
   {
     state: "FULL_TRAFFIC",
     stableWeight: 0,
     candidateWeight: 100,
     minimumRequests: 1,
-    minimumDurationMs: 0
+    minimumDurationMs: 0,
+    maximumObservationMs: 60_000
   },
   {
     state: "OBSERVING",
     stableWeight: 0,
     candidateWeight: 100,
     minimumRequests: 1,
-    minimumDurationMs: 0
+    minimumDurationMs: 0,
+    maximumObservationMs: 60_000
   }
 ];
 
@@ -56,6 +60,10 @@ function queuedDeployment(): Deployment {
     candidateWeight: 0,
     currentStepIndex: 0,
     stateVersion: 0,
+    reconcileFailureCount: 0,
+    rollbackAttemptCount: 0,
+    nextReconcileAt: null,
+    lastReconcileError: null,
     failureReason: null,
     stepStartedAt: null,
     createdAt: now,
@@ -94,8 +102,45 @@ class MemoryDeploymentStore implements DeploymentStore {
     return true;
   }
 
-  public async appendEvent(event: DeploymentEvent): Promise<void> {
+  public async transitionDeployment(
+    deployment: Deployment,
+    expectedStateVersion: number,
+    event: DeploymentEvent
+  ): Promise<boolean> {
+    const updated = await this.updateDeployment(
+      deployment,
+      expectedStateVersion
+    );
+    if (!updated) {
+      return false;
+    }
     this.events.push(event);
+    return true;
+  }
+
+  public async recordReconcileFailure(input: {
+    deploymentId: string;
+    expectedStateVersion: number;
+    error: string;
+    nextReconcileAt: Date;
+    isRollback: boolean;
+  }): Promise<boolean> {
+    if (
+      input.deploymentId !== this.deployment.id ||
+      input.expectedStateVersion !== this.deployment.stateVersion
+    ) {
+      return false;
+    }
+    this.deployment = {
+      ...this.deployment,
+      stateVersion: this.deployment.stateVersion + 1,
+      reconcileFailureCount: this.deployment.reconcileFailureCount + 1,
+      rollbackAttemptCount:
+        this.deployment.rollbackAttemptCount + (input.isRollback ? 1 : 0),
+      nextReconcileAt: input.nextReconcileAt,
+      lastReconcileError: input.error
+    };
+    return true;
   }
 }
 
@@ -117,12 +162,17 @@ class FakeTraffic implements TrafficRouter {
     stableWeight: number;
     candidateWeight: number;
   }> = [];
+  public failuresRemaining = 0;
 
   public async setWeights(input: {
     stableWeight: number;
     candidateWeight: number;
   }): Promise<void> {
     this.calls.push(input);
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw new Error("traffic router unavailable");
+    }
   }
 }
 
@@ -243,7 +293,7 @@ describe("DeploymentReconciler", () => {
       reason: "Minimum observation duration has not elapsed"
     });
 
-    store.deployment.stepStartedAt = new Date("2026-07-27T12:00:00.000Z");
+    store.deployment.stepStartedAt = new Date("2026-07-27T12:00:30.000Z");
     const countResult = await reconciler.reconcile(store.deployment.id);
     expect(countResult).toMatchObject({
       outcome: "WAITING",
@@ -308,5 +358,114 @@ describe("DeploymentReconciler", () => {
     expect(store.deployment.state).toBe("ROLLED_BACK");
     expect(store.deployment.stableWeight).toBe(100);
     expect(store.deployment.candidateWeight).toBe(0);
+  });
+
+  it("resumes from persisted canary state after a worker restart", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "CANARY_10",
+      stableWeight: 90,
+      candidateWeight: 10,
+      stateVersion: 3,
+      stepStartedAt: new Date("2026-07-27T12:00:00.000Z")
+    };
+    const restartedWorker = new DeploymentReconciler({
+      deployments: store,
+      runtime,
+      traffic,
+      metrics,
+      policy: instantPolicy,
+      clock: () => new Date("2026-07-27T12:01:00.000Z")
+    });
+
+    await restartedWorker.reconcile(store.deployment.id);
+
+    expect(store.deployment.state).toBe("CANARY_50");
+    expect(runtime.ensureCalls).toBe(0);
+    expect(traffic.calls).toEqual([
+      { stableWeight: 50, candidateWeight: 50 }
+    ]);
+  });
+
+  it("allows only one of two workers to persist the same transition", async () => {
+    const secondWorker = new DeploymentReconciler({
+      deployments: store,
+      runtime,
+      traffic,
+      metrics,
+      policy: instantPolicy
+    });
+
+    const results = await Promise.all([
+      reconciler.reconcile(store.deployment.id),
+      secondWorker.reconcile(store.deployment.id)
+    ]);
+
+    expect(results.map((result) => result.outcome).sort()).toEqual([
+      "CONFLICT",
+      "TRANSITIONED"
+    ]);
+    expect(store.deployment.state).toBe("STARTING_CANDIDATE");
+    expect(store.events).toHaveLength(1);
+  });
+
+  it("keeps rollback active when traffic restoration fails so it can retry", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "ROLLING_BACK",
+      stateVersion: 4,
+      failureReason: "Candidate error rate exceeded threshold"
+    };
+    traffic.failuresRemaining = 1;
+
+    await expect(
+      reconciler.reconcile(store.deployment.id)
+    ).rejects.toThrow("traffic router unavailable");
+    expect(store.deployment.state).toBe("ROLLING_BACK");
+
+    await reconciler.reconcile(store.deployment.id);
+    expect(store.deployment.state).toBe("ROLLED_BACK");
+    expect(traffic.calls).toEqual([
+      { stableWeight: 100, candidateWeight: 0 },
+      { stableWeight: 100, candidateWeight: 0 }
+    ]);
+  });
+
+  it("fails safe when metrics remain insufficient past the deadline", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "CANARY_10",
+      stateVersion: 3,
+      stepStartedAt: new Date("2026-07-27T11:59:00.000Z")
+    };
+    metrics.candidate = {
+      ...metrics.candidate,
+      requestCount: 0
+    };
+
+    await reconciler.reconcile(store.deployment.id);
+
+    expect(store.deployment.state).toBe("ROLLING_BACK");
+    expect(store.deployment.failureReason).toContain(
+      "Observation deadline exceeded"
+    );
+  });
+
+  it("marks a nonterminal deployment failed after retry exhaustion", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "ROLLING_BACK",
+      stateVersion: 5,
+      lastReconcileError: "router unavailable"
+    };
+
+    await reconciler.failDeployment(
+      store.deployment.id,
+      "router unavailable"
+    );
+
+    expect(store.deployment.state).toBe("FAILED");
+    expect(store.deployment.failureReason).toBe("router unavailable");
+    expect(store.events.at(-1)?.message).toContain("Retry policy exhausted");
   });
 });

@@ -7,6 +7,10 @@ export type WorkerConfig = {
   routerUrl: string;
   pollIntervalMs: number;
   httpTimeoutMs: number;
+  maximumRetryAttempts: number;
+  maximumRollbackAttempts: number;
+  retryBaseDelayMs: number;
+  retryMaximumDelayMs: number;
 };
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -49,6 +53,18 @@ export function loadWorkerConfig(
     candidateUrl: url(env, "CANDIDATE_URL"),
     routerUrl: url(env, "ROUTER_URL"),
     pollIntervalMs: positiveInteger(env, "POLL_INTERVAL_MS", 1_000),
-    httpTimeoutMs: positiveInteger(env, "HTTP_TIMEOUT_MS", 2_000)
+    httpTimeoutMs: positiveInteger(env, "HTTP_TIMEOUT_MS", 2_000),
+    maximumRetryAttempts: positiveInteger(env, "MAXIMUM_RETRY_ATTEMPTS", 5),
+    maximumRollbackAttempts: positiveInteger(
+      env,
+      "MAXIMUM_ROLLBACK_ATTEMPTS",
+      5
+    ),
+    retryBaseDelayMs: positiveInteger(env, "RETRY_BASE_DELAY_MS", 1_000),
+    retryMaximumDelayMs: positiveInteger(
+      env,
+      "RETRY_MAXIMUM_DELAY_MS",
+      30_000
+    )
   };
 }
