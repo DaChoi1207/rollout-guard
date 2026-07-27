@@ -147,6 +147,16 @@ export class PostgresDeploymentRepository {
     return row ? mapDeployment(row) : null;
   }
 
+  public async listActiveDeployments(): Promise<Deployment[]> {
+    const result = await this.database.query<DeploymentRow>(
+      `SELECT *
+       FROM deployments
+       WHERE state NOT IN ('SUCCEEDED', 'ROLLED_BACK', 'FAILED')
+       ORDER BY created_at ASC`
+    );
+    return result.rows.map(mapDeployment);
+  }
+
   public async updateDeployment(
     deployment: Deployment,
     expectedStateVersion: number

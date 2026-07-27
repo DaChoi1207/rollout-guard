@@ -111,6 +111,19 @@ describe("PostgresDeploymentRepository", () => {
     expect(update?.values.at(-1)).toBe(2);
   });
 
+  it("lists only active deployments in creation order", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    database.results.push(queryResult([]));
+
+    await expect(repository.listActiveDeployments()).resolves.toEqual([]);
+
+    expect(database.queries[0]?.text).toContain(
+      "state NOT IN ('SUCCEEDED', 'ROLLED_BACK', 'FAILED')"
+    );
+    expect(database.queries[0]?.text).toContain("ORDER BY created_at ASC");
+  });
+
   it("persists events and request observations", async () => {
     const database = new FakeDatabase();
     const repository = new PostgresDeploymentRepository(database);

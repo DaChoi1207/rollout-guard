@@ -50,14 +50,33 @@ services:
       CANDIDATE_URL: http://candidate:3000
       STABLE_REVISION_ID: v1
       CANDIDATE_REVISION_ID: v2
-      STABLE_WEIGHT: "90"
-      CANDIDATE_WEIGHT: "10"
+      STABLE_WEIGHT: "100"
+      CANDIDATE_WEIGHT: "0"
       UPSTREAM_TIMEOUT_MS: "2000"
     ports:
       - "8080:8080"
     depends_on:
-      - stable
-      - candidate
+      stable:
+        condition: service_started
+      candidate:
+        condition: service_started
+
+  rollout-worker:
+    build:
+      context: .
+      dockerfile: apps/rollout-worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://rollout_guard:rollout_guard@postgres:5432/rollout_guard
+      CANDIDATE_REVISION_ID: v2
+      CANDIDATE_URL: http://candidate:3000
+      ROUTER_URL: http://local-router:8080
+      POLL_INTERVAL_MS: "1000"
+      HTTP_TIMEOUT_MS: "2000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      local-router:
+        condition: service_started
 
 volumes:
   rollout_guard_postgres:

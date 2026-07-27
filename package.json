@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "test": "vitest run",
-    "typecheck": "tsc --build apps/demo-service apps/local-router apps/load-generator apps/database",
+    "typecheck": "tsc --build apps/demo-service apps/local-router apps/load-generator apps/database apps/rollout-worker",
     "db:migrate": "npm run build --workspace @rollout-guard/database && npm run migrate --workspace @rollout-guard/database",
     "load:local": "npm run start --workspace @rollout-guard/load-generator -- --target http://localhost:8080/api/demo --requests-per-second 25 --duration-seconds 30"
   },

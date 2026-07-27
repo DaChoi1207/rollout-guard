@@ -10,6 +10,9 @@ The completed local foundation includes:
 - Tests for simulated failures and weighted routing.
 - A PostgreSQL schema and repository for services, deployments, events, and metrics.
 - Optimistic concurrency and a one-active-deployment-per-service constraint.
+- A reconciliation worker with an explicit deployment state machine.
+- Candidate health checks and staged 10% → 50% → 100% traffic progression.
+- Minimum observation-duration and candidate-request-count gates.
 
 ## Run Locally
 
@@ -35,6 +38,30 @@ Content-Type: application/json
   "candidateWeight": 10
 }
 ```
+
+## Rollout worker
+
+The rollout worker processes active deployments from PostgreSQL. Each
+reconciliation performs at most one state transition:
+
+```text
+QUEUED
+→ STARTING_CANDIDATE
+→ WAITING_FOR_HEALTH
+→ CANARY_10
+→ CANARY_50
+→ FULL_TRAFFIC
+→ OBSERVING
+→ SUCCEEDED
+```
+
+Traffic commands use absolute weights, so retrying a command after a crash is
+safe. State updates use `state_version` optimistic concurrency so two workers
+cannot both commit the same transition.
+
+Milestone 4 deliberately evaluates only candidate health, minimum observation
+time, and request count. Error-rate and p95-latency decisions, rollback, and
+rollback failure handling are the next milestone.
 
 Generate local traffic through the router:
 
