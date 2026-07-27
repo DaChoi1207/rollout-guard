@@ -5,10 +5,11 @@ import type {
 } from "@rollout-guard/database";
 import type {
   DeploymentStore,
+  MetricsProvider,
   RuntimeProvider,
-  StepObservationProvider,
   TrafficRouter
 } from "./contracts.js";
+import { evaluateCandidate, type AnalysisResult } from "./analysis.js";
 import {
   developmentRolloutPolicy,
   findRolloutStep,
@@ -27,7 +28,7 @@ export type ReconcilerDependencies = {
   deployments: DeploymentStore;
   runtime: RuntimeProvider;
   traffic: TrafficRouter;
-  observations: StepObservationProvider;
+  metrics: MetricsProvider;
   policy?: readonly RolloutStep[];
   clock?: () => Date;
   createId?: () => string;
@@ -100,10 +101,7 @@ export class DeploymentReconciler {
         return this.reconcileRolloutStep(deployment);
 
       case "ROLLING_BACK":
-        return {
-          outcome: "WAITING",
-          reason: "Rollback behavior is implemented in Milestone 5"
-        };
+        return this.reconcileRollback(deployment);
 
       case "SUCCEEDED":
       case "ROLLED_BACK":
@@ -163,16 +161,36 @@ export class DeploymentReconciler {
       };
     }
 
-    const requestCount =
-      await this.dependencies.observations.getCandidateRequestCount({
+    const [stableMetrics, candidateMetrics] = await Promise.all([
+      this.dependencies.metrics.getRevisionMetrics({
+        revisionId: deployment.stableRevisionId,
+        since: deployment.createdAt
+      }),
+      this.dependencies.metrics.getRevisionMetrics({
         revisionId: candidateRevisionId,
         since: stepStartedAt
-      });
-    if (requestCount < step.minimumRequests) {
+      })
+    ]);
+    const analysis = evaluateCandidate({
+      stableMetrics,
+      candidateMetrics,
+      minimumCandidateRequests: step.minimumRequests
+    });
+    if (analysis.decision === "INSUFFICIENT_DATA") {
       return {
         outcome: "WAITING",
-        reason: "Minimum candidate request count has not been reached"
+        reason: analysis.reason
       };
+    }
+    if (analysis.decision === "ROLLBACK") {
+      return this.transition(
+        deployment,
+        "ROLLING_BACK",
+        analysis.reason,
+        undefined,
+        analysis,
+        analysis.reason
+      );
     }
 
     const nextState = nextStepState(deployment.state);
@@ -191,7 +209,34 @@ export class DeploymentReconciler {
         ? "Candidate completed the rollout"
         : `Rollout advanced to ${nextState}`,
       nextStep ?? undefined,
-      requestCount
+      analysis
+    );
+  }
+
+  private async reconcileRollback(
+    deployment: Deployment
+  ): Promise<ReconcileResult> {
+    await this.dependencies.traffic.setWeights({
+      stableWeight: 100,
+      candidateWeight: 0
+    });
+    const stableHealthy = await this.dependencies.runtime.isRevisionHealthy(
+      deployment.stableRevisionId
+    );
+    if (!stableHealthy) {
+      return {
+        outcome: "WAITING",
+        reason: "Stable traffic restored but stable revision is not healthy"
+      };
+    }
+    return this.transition(
+      deployment,
+      "ROLLED_BACK",
+      "Stable traffic restored after candidate regression",
+      undefined,
+      undefined,
+      deployment.failureReason,
+      { stableWeight: 100, candidateWeight: 0 }
     );
   }
 
@@ -200,19 +245,29 @@ export class DeploymentReconciler {
     nextState: DeploymentState,
     message: string,
     step?: RolloutStep,
-    requestCount?: number
+    analysis?: AnalysisResult,
+    failureReason?: string | null,
+    weights?: { stableWeight: number; candidateWeight: number }
   ): Promise<ReconcileResult> {
     assertTransitionAllowed(deployment.state, nextState);
     const now = this.clock();
     const updated: Deployment = {
       ...deployment,
       state: nextState,
-      stableWeight: step?.stableWeight ?? deployment.stableWeight,
-      candidateWeight: step?.candidateWeight ?? deployment.candidateWeight,
+      stableWeight:
+        weights?.stableWeight ?? step?.stableWeight ?? deployment.stableWeight,
+      candidateWeight:
+        weights?.candidateWeight ??
+        step?.candidateWeight ??
+        deployment.candidateWeight,
       currentStepIndex: step
         ? this.policy.findIndex((candidate) => candidate.state === step.state)
         : deployment.currentStepIndex,
       stepStartedAt: step ? now : deployment.stepStartedAt,
+      failureReason:
+        failureReason === undefined
+          ? deployment.failureReason
+          : failureReason,
       updatedAt: now
     };
 
@@ -235,7 +290,13 @@ export class DeploymentReconciler {
       metadata: {
         stableWeight: updated.stableWeight,
         candidateWeight: updated.candidateWeight,
-        ...(requestCount === undefined ? {} : { candidateRequestCount: requestCount })
+        ...(analysis
+          ? {
+              analysisDecision: analysis.decision,
+              stableMetrics: analysis.stableMetrics,
+              candidateMetrics: analysis.candidateMetrics
+            }
+          : {})
       },
       createdAt: now
     });

@@ -59,9 +59,28 @@ Traffic commands use absolute weights, so retrying a command after a crash is
 safe. State updates use `state_version` optimistic concurrency so two workers
 cannot both commit the same transition.
 
-Milestone 4 deliberately evaluates only candidate health, minimum observation
-time, and request count. Error-rate and p95-latency decisions, rollback, and
-rollback failure handling are the next milestone.
+At each observation step, the worker now calculates error rate and nearest-rank
+p50/p95/p99 latency separately for stable and candidate revisions. It waits for
+the minimum duration and sample size, requires a stable baseline, and rolls back
+when:
+
+- candidate HTTP 5xx error rate exceeds 2%; or
+- candidate p95 latency exceeds both 1.5× stable p95 and the 500 ms floor.
+
+Rollback uses the idempotent absolute command `stable=100, candidate=0`, verifies
+stable health, persists the failure reason, and records analysis metrics in the
+deployment event.
+
+Create a local demo deployment after the Compose services are running:
+
+```powershell
+$env:DATABASE_URL="postgresql://rollout_guard:rollout_guard@localhost:5432/rollout_guard"
+npm.cmd run deployment:create
+```
+
+Run `npm.cmd run load:local` in another terminal so each step receives enough
+traffic. The default Compose candidate has a 15% simulated error rate and should
+finish as `ROLLED_BACK`.
 
 Generate local traffic through the router:
 

@@ -110,6 +110,17 @@ export class PostgresDeploymentRepository {
     return row ? mapService(row) : null;
   }
 
+  public async getServiceByName(name: string): Promise<Service | null> {
+    const result = await this.database.query<ServiceRow>(
+      `SELECT id, name, created_at, updated_at
+       FROM services
+       WHERE name = $1`,
+      [name]
+    );
+    const row = result.rows[0];
+    return row ? mapService(row) : null;
+  }
+
   public async createDeployment(deployment: Deployment): Promise<void> {
     await this.database.query(
       `INSERT INTO deployments (

@@ -67,6 +67,8 @@ services:
       dockerfile: apps/rollout-worker/Dockerfile
     environment:
       DATABASE_URL: postgresql://rollout_guard:rollout_guard@postgres:5432/rollout_guard
+      STABLE_REVISION_ID: v1
+      STABLE_URL: http://stable:3000
       CANDIDATE_REVISION_ID: v2
       CANDIDATE_URL: http://candidate:3000
       ROUTER_URL: http://local-router:8080

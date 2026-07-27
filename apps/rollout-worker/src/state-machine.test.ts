@@ -9,6 +9,8 @@ describe("deployment state machine", () => {
     expect(isTransitionAllowed("QUEUED", "STARTING_CANDIDATE")).toBe(true);
     expect(isTransitionAllowed("WAITING_FOR_HEALTH", "CANARY_10")).toBe(true);
     expect(isTransitionAllowed("CANARY_10", "CANARY_50")).toBe(true);
+    expect(isTransitionAllowed("CANARY_10", "ROLLING_BACK")).toBe(true);
+    expect(isTransitionAllowed("ROLLING_BACK", "ROLLED_BACK")).toBe(true);
     expect(isTransitionAllowed("OBSERVING", "SUCCEEDED")).toBe(true);
   });
 

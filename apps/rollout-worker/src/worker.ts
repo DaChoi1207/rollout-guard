@@ -10,8 +10,10 @@ const config = loadWorkerConfig();
 const pool = createDatabasePool(config.databaseUrl);
 const deployments = new PostgresDeploymentRepository(pool);
 const runtime = new HttpRuntimeProvider(
-  config.candidateRevisionId,
-  config.candidateUrl,
+  {
+    [config.stableRevisionId]: config.stableUrl,
+    [config.candidateRevisionId]: config.candidateUrl
+  },
   config.httpTimeoutMs
 );
 const traffic = new HttpTrafficRouter(config.routerUrl, config.httpTimeoutMs);
@@ -19,7 +21,7 @@ const reconciler = new DeploymentReconciler({
   deployments,
   runtime,
   traffic,
-  observations: traffic
+  metrics: traffic
 });
 let stopping = false;
 

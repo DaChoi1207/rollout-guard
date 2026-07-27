@@ -5,8 +5,9 @@ import type {
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   DeploymentStore,
+  MetricsProvider,
+  RevisionMetrics,
   RuntimeProvider,
-  StepObservationProvider,
   TrafficRouter
 } from "./contracts.js";
 import type { RolloutStep } from "./policy.js";
@@ -125,31 +126,46 @@ class FakeTraffic implements TrafficRouter {
   }
 }
 
-class FakeObservations implements StepObservationProvider {
-  public requestCount = 100;
+function healthyMetrics(): RevisionMetrics {
+  return {
+    requestCount: 100,
+    errorCount: 0,
+    errorRate: 0,
+    averageLatencyMs: 100,
+    p50LatencyMs: 90,
+    p95LatencyMs: 120,
+    p99LatencyMs: 150
+  };
+}
 
-  public async getCandidateRequestCount(): Promise<number> {
-    return this.requestCount;
+class FakeMetrics implements MetricsProvider {
+  public stable = healthyMetrics();
+  public candidate = healthyMetrics();
+
+  public async getRevisionMetrics(input: {
+    revisionId: string;
+  }): Promise<RevisionMetrics> {
+    return input.revisionId === "v1" ? this.stable : this.candidate;
   }
 }
 
 let store: MemoryDeploymentStore;
 let runtime: FakeRuntime;
 let traffic: FakeTraffic;
-let observations: FakeObservations;
+let metrics: FakeMetrics;
 let reconciler: DeploymentReconciler;
 
 beforeEach(() => {
   store = new MemoryDeploymentStore();
   runtime = new FakeRuntime();
   traffic = new FakeTraffic();
-  observations = new FakeObservations();
+  metrics = new FakeMetrics();
   let id = 0;
   reconciler = new DeploymentReconciler({
     deployments: store,
     runtime,
     traffic,
-    observations,
+    metrics,
     policy: instantPolicy,
     clock: () => new Date("2026-07-27T12:01:00.000Z"),
     createId: () => `event-${(id += 1)}`
@@ -204,7 +220,10 @@ describe("DeploymentReconciler", () => {
       stateVersion: 3,
       stepStartedAt: new Date("2026-07-27T12:00:59.999Z")
     };
-    observations.requestCount = 0;
+    metrics.candidate = {
+      ...metrics.candidate,
+      requestCount: 0
+    };
     const policy: readonly RolloutStep[] = [
       { ...instantPolicy[0]!, minimumDurationMs: 10 },
       ...instantPolicy.slice(1)
@@ -213,7 +232,7 @@ describe("DeploymentReconciler", () => {
       deployments: store,
       runtime,
       traffic,
-      observations,
+      metrics,
       policy,
       clock: () => new Date("2026-07-27T12:01:00.000Z")
     });
@@ -251,5 +270,43 @@ describe("DeploymentReconciler", () => {
     ]);
     expect(store.deployment.state).toBe("CANARY_10");
     expect(store.events).toHaveLength(1);
+  });
+
+  it("rolls back a high-error candidate and restores stable traffic", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "CANARY_10",
+      stableWeight: 90,
+      candidateWeight: 10,
+      stateVersion: 3,
+      stepStartedAt: new Date("2026-07-27T12:00:00.000Z")
+    };
+    metrics.candidate = {
+      ...metrics.candidate,
+      errorCount: 15,
+      errorRate: 0.15
+    };
+
+    const regression = await reconciler.reconcile(store.deployment.id);
+    expect(regression).toMatchObject({
+      outcome: "TRANSITIONED",
+      from: "CANARY_10",
+      to: "ROLLING_BACK"
+    });
+    expect(store.deployment.failureReason).toContain("15.00%");
+
+    const rollback = await reconciler.reconcile(store.deployment.id);
+    expect(rollback).toMatchObject({
+      outcome: "TRANSITIONED",
+      from: "ROLLING_BACK",
+      to: "ROLLED_BACK"
+    });
+    expect(traffic.calls.at(-1)).toEqual({
+      stableWeight: 100,
+      candidateWeight: 0
+    });
+    expect(store.deployment.state).toBe("ROLLED_BACK");
+    expect(store.deployment.stableWeight).toBe(100);
+    expect(store.deployment.candidateWeight).toBe(0);
   });
 });

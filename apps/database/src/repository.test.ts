@@ -96,6 +96,26 @@ describe("PostgresDeploymentRepository", () => {
     expect(database.queries[1]?.text).toContain("INSERT INTO deployments");
   });
 
+  it("finds a service by its stable name", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    database.results.push(
+      queryResult([
+        {
+          id: service.id,
+          name: service.name,
+          created_at: timestamp,
+          updated_at: timestamp
+        }
+      ])
+    );
+
+    await expect(repository.getServiceByName(service.name)).resolves.toEqual(
+      service
+    );
+    expect(database.queries[0]?.values).toEqual([service.name]);
+  });
+
   it("uses state_version for optimistic concurrency", async () => {
     const database = new FakeDatabase();
     const repository = new PostgresDeploymentRepository(database);

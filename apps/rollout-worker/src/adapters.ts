@@ -1,8 +1,10 @@
 import type {
+  MetricsProvider,
   RuntimeProvider,
-  StepObservationProvider,
   TrafficRouter
 } from "./contracts.js";
+import { calculateRevisionMetrics } from "./metrics.js";
+import type { RevisionMetrics } from "./contracts.js";
 
 async function fetchWithTimeout(
   url: string,
@@ -20,25 +22,25 @@ async function fetchWithTimeout(
 
 export class HttpRuntimeProvider implements RuntimeProvider {
   public constructor(
-    private readonly candidateRevisionId: string,
-    private readonly candidateBaseUrl: string,
+    private readonly revisionUrls: Readonly<Record<string, string>>,
     private readonly timeoutMs: number
   ) {}
 
   public async ensureCandidate(revisionId: string): Promise<void> {
-    if (revisionId !== this.candidateRevisionId) {
+    if (!this.revisionUrls[revisionId]) {
       throw new Error(`Unknown local candidate revision: ${revisionId}`);
     }
   }
 
   public async isRevisionHealthy(revisionId: string): Promise<boolean> {
-    if (revisionId !== this.candidateRevisionId) {
+    const revisionUrl = this.revisionUrls[revisionId];
+    if (!revisionUrl) {
       return false;
     }
 
     try {
       const response = await fetchWithTimeout(
-        `${this.candidateBaseUrl}/health`,
+        `${revisionUrl}/health`,
         { method: "GET" },
         this.timeoutMs
       );
@@ -57,7 +59,7 @@ export class HttpRuntimeProvider implements RuntimeProvider {
 }
 
 export class HttpTrafficRouter
-  implements TrafficRouter, StepObservationProvider
+  implements TrafficRouter, MetricsProvider
 {
   public constructor(
     private readonly routerBaseUrl: string,
@@ -82,10 +84,10 @@ export class HttpTrafficRouter
     }
   }
 
-  public async getCandidateRequestCount(input: {
+  public async getRevisionMetrics(input: {
     revisionId: string;
     since: Date;
-  }): Promise<number> {
+  }): Promise<RevisionMetrics> {
     const response = await fetchWithTimeout(
       `${this.routerBaseUrl}/internal/observations`,
       { method: "GET" },
@@ -97,6 +99,8 @@ export class HttpTrafficRouter
     const body = (await response.json()) as {
       observations?: Array<{
         revisionId?: unknown;
+        statusCode?: unknown;
+        durationMs?: unknown;
         timestamp?: unknown;
       }>;
     };
@@ -104,15 +108,24 @@ export class HttpTrafficRouter
       throw new Error("Traffic observations response is invalid");
     }
 
-    return body.observations.filter((observation) => {
+    const observations = body.observations.filter((observation) => {
       if (
         observation.revisionId !== input.revisionId ||
-        typeof observation.timestamp !== "string"
+        typeof observation.timestamp !== "string" ||
+        typeof observation.statusCode !== "number" ||
+        typeof observation.durationMs !== "number"
       ) {
         return false;
       }
       const timestamp = Date.parse(observation.timestamp);
       return Number.isFinite(timestamp) && timestamp >= input.since.getTime();
-    }).length;
+    }) as Array<{
+      revisionId: string;
+      statusCode: number;
+      durationMs: number;
+      timestamp: string;
+    }>;
+
+    return calculateRevisionMetrics(observations);
   }
 }

@@ -25,9 +25,19 @@ export interface TrafficRouter {
   }): Promise<void>;
 }
 
-export interface StepObservationProvider {
-  getCandidateRequestCount(input: {
+export type RevisionMetrics = {
+  requestCount: number;
+  errorCount: number;
+  errorRate: number;
+  averageLatencyMs: number;
+  p50LatencyMs: number;
+  p95LatencyMs: number;
+  p99LatencyMs: number;
+};
+
+export interface MetricsProvider {
+  getRevisionMetrics(input: {
     revisionId: string;
     since: Date;
-  }): Promise<number>;
+  }): Promise<RevisionMetrics>;
 }

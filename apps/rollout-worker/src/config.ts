@@ -1,5 +1,7 @@
 export type WorkerConfig = {
   databaseUrl: string;
+  stableRevisionId: string;
+  stableUrl: string;
   candidateRevisionId: string;
   candidateUrl: string;
   routerUrl: string;
@@ -41,6 +43,8 @@ export function loadWorkerConfig(
 ): WorkerConfig {
   return {
     databaseUrl: required(env, "DATABASE_URL"),
+    stableRevisionId: env.STABLE_REVISION_ID ?? "v1",
+    stableUrl: url(env, "STABLE_URL"),
     candidateRevisionId: env.CANDIDATE_REVISION_ID ?? "v2",
     candidateUrl: url(env, "CANDIDATE_URL"),
     routerUrl: url(env, "ROUTER_URL"),
