@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: rollout_guard
+      POSTGRES_USER: rollout_guard
+      POSTGRES_PASSWORD: rollout_guard
+    ports:
+      - "5432:5432"
+    volumes:
+      - rollout_guard_postgres:/var/lib/postgresql/data
+      - ./apps/database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rollout_guard -d rollout_guard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  stable:
+    build:
+      context: .
+      dockerfile: apps/demo-service/Dockerfile
+    environment:
+      APP_VERSION: v1
+      ERROR_RATE: "0"
+      RESPONSE_DELAY_MS: "50"
+      PORT: "3000"
+    ports:
+      - "3001:3000"
+
+  candidate:
+    build:
+      context: .
+      dockerfile: apps/demo-service/Dockerfile
+    environment:
+      APP_VERSION: v2
+      ERROR_RATE: "0.15"
+      RESPONSE_DELAY_MS: "300"
+      PORT: "3000"
+    ports:
+      - "3002:3000"
+
+  local-router:
+    build:
+      context: .
+      dockerfile: apps/local-router/Dockerfile
+    environment:
+      PORT: "8080"
+      STABLE_URL: http://stable:3000
+      CANDIDATE_URL: http://candidate:3000
+      STABLE_REVISION_ID: v1
+      CANDIDATE_REVISION_ID: v2
+      STABLE_WEIGHT: "90"
+      CANDIDATE_WEIGHT: "10"
+      UPSTREAM_TIMEOUT_MS: "2000"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - stable
+      - candidate
+
+volumes:
+  rollout_guard_postgres:

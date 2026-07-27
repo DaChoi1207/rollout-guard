@@ -1,0 +1,24 @@
+{
+  "name": "rollout-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "vitest run",
+    "typecheck": "tsc --build apps/demo-service apps/local-router apps/load-generator apps/database",
+    "db:migrate": "npm run build --workspace @rollout-guard/database && npm run migrate --workspace @rollout-guard/database",
+    "load:local": "npm run start --workspace @rollout-guard/load-generator -- --target http://localhost:8080/api/demo --requests-per-second 25 --duration-seconds 30"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "fastify": "^5.4.0"
+  }
+}
