@@ -36,13 +36,13 @@ resource "aws_ecs_cluster" "main" {
 locals {
   revisions = {
     stable = {
-      image      = var.stable_image
+      image      = "${aws_ecr_repository.demo.repository_url}:stable"
       version    = "v1"
       error_rate = "0"
       delay_ms   = "50"
     }
     candidate = {
-      image      = var.candidate_image
+      image      = "${aws_ecr_repository.demo.repository_url}:candidate"
       version    = "v2"
       error_rate = tostring(var.candidate_error_rate)
       delay_ms   = "300"

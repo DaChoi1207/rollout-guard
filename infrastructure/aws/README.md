@@ -9,22 +9,44 @@ zero tasks and the controller scales it up when a rollout begins.
 
 - Terraform 1.8 or newer
 - AWS CLI credentials for a sandbox account
-- Stable and candidate demo-service images pushed to ECR
+- Docker Desktop running
+- An AWS CLI profile with permission to create the demo resources
 
-Copy `terraform.tfvars.example` to `terraform.tfvars`, replace the image URIs,
-then review the plan:
+The recommended workflow uses the guarded PowerShell scripts from the project
+root. Plan-only mode authenticates to AWS and previews the infrastructure but
+does not create resources:
 
 ```powershell
-terraform init
-terraform fmt -check
-terraform validate
-terraform plan
+.\scripts\aws-demo-up.ps1 -BudgetEmail "you@example.com"
 ```
 
-Do not apply this configuration casually: the ALB, Fargate tasks, and public
-IPv4 addresses can incur AWS charges.
+To create the billable demo after reviewing the plan:
 
-After apply, use `terraform output` to populate the AWS worker environment:
+```powershell
+.\scripts\aws-demo-up.ps1 -BudgetEmail "you@example.com" -Apply
+.\scripts\aws-demo-run.ps1
+.\scripts\aws-demo-status.ps1
+```
+
+The up script creates ECR first, builds the demo image once, pushes immutable
+`stable` and `candidate` tags, then applies the complete reviewed plan. Runtime
+behavior differs through ECS environment variables, so both revisions can use
+the same image. The AWS rollout policy waits for CloudWatch's one-minute ALB
+metric periods instead of using the faster local-development timing.
+
+Always tear down the demo when finished:
+
+```powershell
+.\scripts\aws-demo-down.ps1
+```
+
+The configuration creates a $10 monthly AWS Budget when `BudgetEmail` is
+provided. Budget notifications are warnings, not hard spending caps. The ALB,
+Fargate tasks, and public IPv4 addresses continue to incur charges until the
+infrastructure is destroyed.
+
+After apply, the up script writes an ignored `.aws-demo.env` file from these
+Terraform outputs:
 
 ```text
 ECS_CLUSTER
@@ -42,3 +64,6 @@ The worker uses the normal AWS SDK credential chain. Its IAM principal needs
 `ecs:DescribeServices`, `ecs:UpdateService`,
 `elasticloadbalancing:DescribeTargetHealth`,
 `elasticloadbalancing:ModifyListener`, and `cloudwatch:GetMetricData`.
+Terraform creates a least-privilege policy containing those permissions and
+returns its ARN as `rollout_worker_policy_arn`; it does not automatically attach
+the policy to your existing AWS identity.

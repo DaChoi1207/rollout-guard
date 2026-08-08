@@ -17,3 +17,8 @@ export type {
   RuntimeProvider,
   TrafficRouter
 } from "./contracts.js";
+export {
+  developmentRolloutPolicy,
+  findRolloutStep,
+  type RolloutStep
+} from "./policy.js";

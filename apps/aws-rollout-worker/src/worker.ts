@@ -16,6 +16,7 @@ import {
   handleReconcileFailure
 } from "@rollout-guard/rollout-worker";
 import { loadAwsWorkerConfig } from "./config.js";
+import { awsRolloutPolicy } from "./policy.js";
 
 const config = loadAwsWorkerConfig();
 await runMigrations(config.databaseUrl);
@@ -59,7 +60,8 @@ const reconciler = new DeploymentReconciler({
   deployments,
   runtime,
   traffic,
-  metrics
+  metrics,
+  policy: awsRolloutPolicy
 });
 let stopping = false;
 

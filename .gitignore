@@ -13,6 +13,11 @@ node_modules/
 **/.terraform/
 terraform.tfvars
 *.auto.tfvars
+*.tfplan
+.aws-demo.env
+.aws-worker.pid
+aws-worker.log
+aws-worker-error.log
 crash.log
 crash.*.log
 

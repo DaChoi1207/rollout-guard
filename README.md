@@ -170,6 +170,8 @@ rollout state machine:
 
 Terraform for the AWS demo lives in `infrastructure/aws`. It provisions the
 network, security groups, ALB, stable/candidate target groups, ECS cluster,
-Fargate services, execution role, and CloudWatch logs. See its README for
-prerequisites and plan commands. Running `terraform apply` creates billable
-resources and is intentionally not part of local validation.
+Fargate services, ECR repository, execution role, least-privilege worker policy,
+CloudWatch logs, and a configurable AWS Budget. Guarded PowerShell commands in
+`scripts/` provide plan, deployment, rollout, status, and teardown workflows.
+See the infrastructure README before using them. Running the apply workflow
+creates billable resources and is intentionally separate from local validation.
