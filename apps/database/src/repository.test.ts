@@ -211,6 +211,40 @@ describe("PostgresDeploymentRepository", () => {
     );
   });
 
+  it("creates a deployment and initial event atomically", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    const event: DeploymentEvent = {
+      id: "30000000-0000-4000-8000-000000000001",
+      deploymentId: deployment.id,
+      eventType: "DEPLOYMENT_CREATED",
+      fromState: null,
+      toState: "QUEUED",
+      message: "Deployment created",
+      metadata: {},
+      createdAt: timestamp
+    };
+
+    await repository.createDeploymentWithEvent(deployment, event);
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0]?.text).toContain("WITH inserted AS");
+    expect(database.queries[0]?.text).toContain(
+      "INSERT INTO deployment_events"
+    );
+  });
+
+  it("lists recent deployments with a bounded query", async () => {
+    const database = new FakeDatabase();
+    const repository = new PostgresDeploymentRepository(database);
+    database.results.push(queryResult([]));
+
+    await expect(repository.listDeployments(25)).resolves.toEqual([]);
+
+    expect(database.queries[0]?.text).toContain("ORDER BY created_at DESC");
+    expect(database.queries[0]?.values).toEqual([25]);
+  });
+
   it("records retry state with optimistic concurrency", async () => {
     const database = new FakeDatabase();
     const repository = new PostgresDeploymentRepository(database);

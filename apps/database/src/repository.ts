@@ -163,6 +163,59 @@ export class PostgresDeploymentRepository {
     );
   }
 
+  public async createDeploymentWithEvent(
+    deployment: Deployment,
+    event: DeploymentEvent
+  ): Promise<void> {
+    await this.database.query(
+      `WITH inserted AS (
+         INSERT INTO deployments (
+           id, service_id, stable_revision_id, candidate_revision_id, state,
+           stable_weight, candidate_weight, current_step_index, state_version,
+           reconcile_failure_count, rollback_attempt_count, next_reconcile_at,
+           last_reconcile_error, failure_reason, step_started_at, created_at, updated_at
+         )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+           $15, $16, $17
+         )
+         RETURNING id
+       )
+       INSERT INTO deployment_events (
+         id, deployment_id, event_type, from_state, to_state,
+         message, metadata, created_at
+       )
+       SELECT $18, inserted.id, $19, $20, $21, $22, $23::JSONB, $24
+       FROM inserted`,
+      [
+        deployment.id,
+        deployment.serviceId,
+        deployment.stableRevisionId,
+        deployment.candidateRevisionId,
+        deployment.state,
+        deployment.stableWeight,
+        deployment.candidateWeight,
+        deployment.currentStepIndex,
+        deployment.stateVersion,
+        deployment.reconcileFailureCount,
+        deployment.rollbackAttemptCount,
+        deployment.nextReconcileAt,
+        deployment.lastReconcileError,
+        deployment.failureReason,
+        deployment.stepStartedAt,
+        deployment.createdAt,
+        deployment.updatedAt,
+        event.id,
+        event.eventType,
+        event.fromState,
+        event.toState,
+        event.message,
+        JSON.stringify(event.metadata),
+        event.createdAt
+      ]
+    );
+  }
+
   public async getDeploymentById(id: string): Promise<Deployment | null> {
     const result = await this.database.query<DeploymentRow>(
       `SELECT *
@@ -181,6 +234,17 @@ export class PostgresDeploymentRepository {
        WHERE state NOT IN ('SUCCEEDED', 'ROLLED_BACK', 'FAILED')
          AND (next_reconcile_at IS NULL OR next_reconcile_at <= NOW())
        ORDER BY created_at ASC`
+    );
+    return result.rows.map(mapDeployment);
+  }
+
+  public async listDeployments(limit = 50): Promise<Deployment[]> {
+    const result = await this.database.query<DeploymentRow>(
+      `SELECT *
+       FROM deployments
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
     );
     return result.rows.map(mapDeployment);
   }

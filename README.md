@@ -13,6 +13,9 @@ The completed local foundation includes:
 - A reconciliation worker with an explicit deployment state machine.
 - Candidate health checks and staged 10% → 50% → 100% traffic progression.
 - Minimum observation-duration and candidate-request-count gates.
+- Production-style AWS adapters for ECS, ALB weighted forwarding, and
+  CloudWatch metrics.
+- Reproducible Terraform for a two-AZ ALB and ECS Fargate demo environment.
 
 ## Run Locally
 
@@ -24,6 +27,8 @@ docker compose up --build
 
 Useful endpoints:
 
+- Dashboard: `http://localhost:3000`
+- Control API: `http://localhost:3005`
 - Stable revision: `http://localhost:3001/version`
 - Candidate revision: `http://localhost:3002/version`
 - Router entry point: `http://localhost:8080/api/demo`
@@ -100,6 +105,28 @@ past the observation deadline, the controller fails safe by entering rollback.
 Two workers may issue the same absolute traffic command, but `state_version`
 allows only one of them to commit the transition and event.
 
+## Control API and dashboard
+
+The local dashboard presents deployment state, live traffic weights, stable and
+candidate metrics, threshold violations, and the persisted event timeline. Its
+**Run broken release** action starts 30 seconds of demo traffic and creates the
+`v1 → v2` deployment through the control API.
+
+Core API endpoints:
+
+```text
+GET  /health
+GET  /deployments
+POST /deployments
+GET  /deployments/:id
+POST /deployments/:id/rollback
+POST /demo/load
+```
+
+The deployment list and detail endpoints read durable state from PostgreSQL.
+Metrics and traffic weights are read from the local router. Manual rollback uses
+the same optimistic-concurrency transition path as automatic rollback.
+
 Generate local traffic through the router:
 
 ```powershell
@@ -127,3 +154,22 @@ Or customize the run:
 ```powershell
 npm.cmd run start --workspace @rollout-guard/load-generator -- --target http://localhost:8080/api/demo --requests-per-second 25 --duration-seconds 60 --concurrency 10
 ```
+
+## AWS execution layer
+
+The same `DeploymentReconciler` can now run against AWS without changing the
+rollout state machine:
+
+- `EcsRuntimeProvider` starts the candidate ECS service and checks ALB target
+  health.
+- `AlbTrafficRouter` applies idempotent absolute weights to the ALB listener.
+- `CloudWatchMetricsProvider` reads per-target-group request count, 5xx count,
+  average latency, and p50/p95/p99 latency.
+- `aws-rollout-worker` wires those adapters to the existing PostgreSQL
+  repository, retry policy, and reconciler.
+
+Terraform for the AWS demo lives in `infrastructure/aws`. It provisions the
+network, security groups, ALB, stable/candidate target groups, ECS cluster,
+Fargate services, execution role, and CloudWatch logs. See its README for
+prerequisites and plan commands. Running `terraform apply` creates billable
+resources and is intentionally not part of local validation.

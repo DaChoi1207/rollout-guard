@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true,
+    "declaration": true
+  },
+  "references": [
+    { "path": "../database" },
+    { "path": "../rollout-worker" },
+    { "path": "../aws-adapters" }
+  ],
+  "include": ["src/**/*.ts"]
+}

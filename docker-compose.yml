@@ -84,5 +84,34 @@ services:
       local-router:
         condition: service_started
 
+  control-api:
+    build:
+      context: .
+      dockerfile: apps/control-api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://rollout_guard:rollout_guard@postgres:5432/rollout_guard
+      ROUTER_URL: http://local-router:8080
+      DASHBOARD_ORIGIN: http://localhost:3000
+      PORT: "3005"
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      local-router:
+        condition: service_started
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3005
+    ports:
+      - "3000:80"
+    depends_on:
+      control-api:
+        condition: service_started
+
 volumes:
   rollout_guard_postgres:
