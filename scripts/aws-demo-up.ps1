@@ -49,9 +49,13 @@ $repositoryUrl = Get-TerraformOutput "ecr_repository_url"
 $registry = $repositoryUrl.Split('/')[0]
 
 Write-Host "Authenticating Docker with $registry"
-$password = & aws ecr get-login-password --region $Region
-if ($LASTEXITCODE -ne 0) { throw "Could not obtain an ECR login token." }
-$password | docker login --username AWS --password-stdin $registry
+if ($Region -notmatch '^[a-z]{2}-[a-z]+-\d$') { throw "Invalid AWS region '$Region'." }
+if ($registry -notmatch '^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$') {
+  throw "Unexpected ECR registry '$registry'."
+}
+# Windows PowerShell 5.1 can alter native-pipeline encoding. cmd.exe preserves
+# the ECR token bytes while keeping the token out of arguments and off disk.
+& cmd.exe /d /c "aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin $registry"
 if ($LASTEXITCODE -ne 0) { throw "Docker could not authenticate with ECR." }
 
 Push-Location $script:ProjectRoot

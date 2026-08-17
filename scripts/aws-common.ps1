@@ -52,7 +52,9 @@ function Get-TerraformVariables {
 function Get-TerraformOutput {
   param([Parameter(Mandatory)][string]$Name)
 
-  $value = & terraform -chdir=$script:TerraformDirectory output -raw $Name
+  # Parentheses are required here because PowerShell otherwise parses the
+  # colon in the script-scoped variable as part of the native argument.
+  $value = & terraform "-chdir=$($script:TerraformDirectory)" output -raw $Name
   if ($LASTEXITCODE -ne 0) {
     throw "Could not read Terraform output '$Name'."
   }
