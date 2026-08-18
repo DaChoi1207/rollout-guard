@@ -26,6 +26,7 @@ export interface DeploymentStore {
 
 export interface RuntimeProvider {
   ensureCandidate(revisionId: string): Promise<void>;
+  stopCandidate(revisionId: string): Promise<void>;
   isRevisionHealthy(revisionId: string): Promise<boolean>;
 }
 

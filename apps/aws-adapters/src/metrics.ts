@@ -50,7 +50,7 @@ export class CloudWatchMetricsProvider implements MetricsProvider {
         EndTime: this.clock(),
         ScanBy: "TimestampAscending",
         MetricDataQueries: [
-          this.query("requests", "RequestCount", "Sum", common),
+          this.query("requests", "RequestCountPerTarget", "Sum", common),
           this.query("errors", "HTTPCode_Target_5XX_Count", "Sum", common),
           this.query("average", "TargetResponseTime", "Average", common),
           this.query("p50", "TargetResponseTime", "p50", common),

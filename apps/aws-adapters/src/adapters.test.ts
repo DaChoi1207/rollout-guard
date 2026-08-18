@@ -43,6 +43,36 @@ describe("EcsRuntimeProvider", () => {
     });
   });
 
+  it("scales a running candidate service to zero during rollback", async () => {
+    const ecs = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce({
+          services: [{ status: "ACTIVE", desiredCount: 1 }]
+        })
+        .mockResolvedValueOnce({})
+    };
+    const runtime = new EcsRuntimeProvider(
+      ecs as never,
+      { send: vi.fn() } as never,
+      {
+        cluster: "demo",
+        revisions: {
+          v2: { serviceName: "candidate", targetGroupArn: "candidate-tg" }
+        }
+      }
+    );
+
+    await runtime.stopCandidate("v2");
+
+    expect(ecs.send.mock.calls[1]?.[0]).toBeInstanceOf(UpdateServiceCommand);
+    expect(ecs.send.mock.calls[1]?.[0].input).toMatchObject({
+      cluster: "demo",
+      service: "candidate",
+      desiredCount: 0
+    });
+  });
+
   it("uses target health for readiness", async () => {
     const elb = {
       send: vi.fn().mockResolvedValue({
@@ -148,5 +178,8 @@ describe("CloudWatchMetricsProvider", () => {
     const command = cloudWatch.send.mock.calls[0]?.[0];
     expect(command).toBeInstanceOf(GetMetricDataCommand);
     expect(command.input.MetricDataQueries).toHaveLength(6);
+    expect(
+      command.input.MetricDataQueries[0]?.MetricStat?.Metric?.MetricName
+    ).toBe("RequestCountPerTarget");
   });
 });

@@ -28,7 +28,9 @@ $env:SERVICE_NAME = "aws-demo-service"
 
 Push-Location $script:ProjectRoot
 try {
-  Invoke-Checked docker compose up -d postgres
+  # Use the long form because PowerShell advanced functions can interpret -d
+  # as the common -Debug parameter before it reaches Docker Compose.
+  Invoke-Checked docker compose up --detach postgres
   Invoke-Checked npm.cmd run db:migrate
   Invoke-Checked npm.cmd run build --workspace "@rollout-guard/aws-rollout-worker"
   Invoke-Checked npm.cmd run deployment:create

@@ -147,9 +147,19 @@ class MemoryDeploymentStore implements DeploymentStore {
 class FakeRuntime implements RuntimeProvider {
   public healthy = true;
   public ensureCalls = 0;
+  public stopCalls = 0;
+  public stopFailuresRemaining = 0;
 
   public async ensureCandidate(): Promise<void> {
     this.ensureCalls += 1;
+  }
+
+  public async stopCandidate(): Promise<void> {
+    this.stopCalls += 1;
+    if (this.stopFailuresRemaining > 0) {
+      this.stopFailuresRemaining -= 1;
+      throw new Error("candidate runtime unavailable");
+    }
   }
 
   public async isRevisionHealthy(): Promise<boolean> {
@@ -358,6 +368,7 @@ describe("DeploymentReconciler", () => {
     expect(store.deployment.state).toBe("ROLLED_BACK");
     expect(store.deployment.stableWeight).toBe(100);
     expect(store.deployment.candidateWeight).toBe(0);
+    expect(runtime.stopCalls).toBe(1);
   });
 
   it("resumes from persisted canary state after a worker restart", async () => {
@@ -425,6 +436,30 @@ describe("DeploymentReconciler", () => {
 
     await reconciler.reconcile(store.deployment.id);
     expect(store.deployment.state).toBe("ROLLED_BACK");
+    expect(traffic.calls).toEqual([
+      { stableWeight: 100, candidateWeight: 0 },
+      { stableWeight: 100, candidateWeight: 0 }
+    ]);
+    expect(runtime.stopCalls).toBe(1);
+  });
+
+  it("keeps rollback active when candidate shutdown fails so it can retry", async () => {
+    store.deployment = {
+      ...store.deployment,
+      state: "ROLLING_BACK",
+      stateVersion: 4,
+      failureReason: "Candidate error rate exceeded threshold"
+    };
+    runtime.stopFailuresRemaining = 1;
+
+    await expect(
+      reconciler.reconcile(store.deployment.id)
+    ).rejects.toThrow("candidate runtime unavailable");
+    expect(store.deployment.state).toBe("ROLLING_BACK");
+
+    await reconciler.reconcile(store.deployment.id);
+    expect(store.deployment.state).toBe("ROLLED_BACK");
+    expect(runtime.stopCalls).toBe(2);
     expect(traffic.calls).toEqual([
       { stableWeight: 100, candidateWeight: 0 },
       { stableWeight: 100, candidateWeight: 0 }

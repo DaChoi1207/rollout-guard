@@ -266,6 +266,14 @@ export class DeploymentReconciler {
         reason: "Stable traffic restored but stable revision is not healthy"
       };
     }
+    if (!deployment.candidateRevisionId) {
+      throw new Error(
+        `Deployment ${deployment.id} is missing its candidate revision`
+      );
+    }
+    await this.dependencies.runtime.stopCandidate(
+      deployment.candidateRevisionId
+    );
     return this.transition(
       deployment,
       "ROLLED_BACK",

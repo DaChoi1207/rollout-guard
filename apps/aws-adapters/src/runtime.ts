@@ -31,6 +31,20 @@ export class EcsRuntimeProvider implements RuntimeProvider {
   ) {}
 
   public async ensureCandidate(revisionId: string): Promise<void> {
+    await this.setDesiredCount(
+      revisionId,
+      this.config.candidateDesiredCount ?? 1
+    );
+  }
+
+  public async stopCandidate(revisionId: string): Promise<void> {
+    await this.setDesiredCount(revisionId, 0);
+  }
+
+  private async setDesiredCount(
+    revisionId: string,
+    desiredCount: number
+  ): Promise<void> {
     const revision = this.revision(revisionId);
     const response = await this.ecs.send(
       new DescribeServicesCommand({
@@ -43,7 +57,6 @@ export class EcsRuntimeProvider implements RuntimeProvider {
       throw new Error(`ECS service ${revision.serviceName} was not found`);
     }
 
-    const desiredCount = this.config.candidateDesiredCount ?? 1;
     if (service.desiredCount !== desiredCount) {
       await this.ecs.send(
         new UpdateServiceCommand({

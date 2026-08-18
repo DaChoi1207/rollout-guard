@@ -28,6 +28,11 @@ To create the billable demo after reviewing the plan:
 .\scripts\aws-demo-status.ps1
 ```
 
+The status script reports ECS task counts, ALB weights, worker-process status,
+and the latest persisted AWS deployment state when the local PostgreSQL
+container is available. During rollback the worker restores 100% stable
+traffic, verifies stable health, and scales candidate ECS capacity to zero.
+
 The up script creates ECR first, builds the demo image once, pushes immutable
 `stable` and `candidate` tags, then applies the complete reviewed plan. Runtime
 behavior differs through ECS environment variables, so both revisions can use

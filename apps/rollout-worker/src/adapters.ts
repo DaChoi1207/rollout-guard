@@ -32,6 +32,14 @@ export class HttpRuntimeProvider implements RuntimeProvider {
     }
   }
 
+  public async stopCandidate(revisionId: string): Promise<void> {
+    if (!this.revisionUrls[revisionId]) {
+      throw new Error(`Unknown local candidate revision: ${revisionId}`);
+    }
+    // Local Compose keeps the candidate container available between demos.
+    // Restoring router weight to zero is the local equivalent of stopping it.
+  }
+
   public async isRevisionHealthy(revisionId: string): Promise<boolean> {
     const revisionUrl = this.revisionUrls[revisionId];
     if (!revisionUrl) {
